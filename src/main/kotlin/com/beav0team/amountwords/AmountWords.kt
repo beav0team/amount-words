@@ -1,0 +1,168 @@
+package com.beav0team.amountwords
+
+/**
+ * French number-to-words for invoice amounts.
+ *
+ * Writes an amount in dirhams and centimes, e.g.
+ * `123.45` → "CENT VINGT-TROIS DIRHAMS ET QUARANTE-CINQ CENTIMES".
+ *
+ * Adapted from an earlier number-to-words module. The reverse-parser trick:
+ * tests parse French back into a number and compare with the source amount,
+ * plus an exhaustive sweep of all 100 centime values.
+ *
+ * Pure Kotlin — no Android, no library dependency. Usable on the JVM, in
+ * Kotlin/Multiplatform, or dropped into any project as a single file.
+ *
+ * @author ported from Facture Maroc (com.yassine.facturemaroc.data.AmountWords)
+ */
+object AmountWords {
+
+    private val units = arrayOf(
+        "", "UN", "DEUX", "TROIS", "QUATRE", "CINQ", "SIX", "SEPT", "HUIT", "NEUF"
+    )
+    private val teens = arrayOf(
+        "DIX", "ONZE", "DOUZE", "TREIZE", "QUATORZE", "QUINZE", "SEIZE", "DIX-SEPT",
+        "DIX-HUIT", "DIX-NEUF"
+    )
+    private val tens = arrayOf(
+        "", "", "VINGT", "TRENTE", "QUARANTE", "CINQUANTE", "SOIXANTE", "SOIXANTE",
+        "QUATRE-VINGT", "QUATRE-VINGT"
+    )
+
+    /**
+     * The amount alone, in words: "CINQ CENTS DIRHAMS ET QUINZE CENTIMES".
+     *
+     * Used where the sentence's legal opening would be wrong — a payment
+     * receipt states a sum received, it does not "arrêter la présente facture".
+     *
+     * @param amount the amount in dirhams (may be negative or fractional)
+     */
+    fun amount(amount: Double): String {
+        val dirhams = Math.floor(amount).toInt()
+        val centimes = Math.round((amount - dirhams) * 100).toInt()
+        val dirhamsText = if (dirhams == 0) "ZÉRO" else numberToWords(dirhams)
+        val centimesText = if (centimes == 0) "" else numberToWords(centimes)
+        return "$dirhamsText ${if (dirhams == 1) "DIRHAM" else "DIRHAMS"}" +
+            if (centimesText.isNotEmpty()) {
+                " ET $centimesText ${if (centimes == 1) "CENTIME" else "CENTIMES"}"
+            } else {
+                ""
+            }
+    }
+
+    /**
+     * The amount with its legal opening phrase, e.g.
+     * `ARRÊTÉE LA PRÉSENTE FACTURE À LA SOMME DE : CENT VINGT-TROIS DIRHAMS.`
+     *
+     * @param amount the amount in dirhams
+     * @param documentType the document type, which chooses the opening phrase
+     *   (defaults to [DocumentType.FACTURE])
+     */
+    fun sentence(amount: Double, documentType: DocumentType = DocumentType.FACTURE): String {
+        val opening = when (documentType) {
+            DocumentType.DEVIS -> "ARRÊTÉ LE PRÉSENT DEVIS À LA SOMME DE :"
+            DocumentType.BON_DE_COMMANDE -> "ARRÊTÉ LE PRÉSENT BON DE COMMANDE À LA SOMME DE :"
+            DocumentType.AVOIR -> "ARRÊTÉ LE PRÉSENT AVOIR À LA SOMME DE :"
+            DocumentType.PROFORMA -> "ARRÊTÉ LE PRÉSENT PROFORMA À LA SOMME DE :"
+            DocumentType.ACOMPTE -> "ARRÊTÉ LE PRÉSENT ACOMPTE À LA SOMME DE :"
+            DocumentType.REGULARISATION ->
+                "ARRÊTÉE LA PRÉSENTE RÉGULARISATION À LA SOMME DE :"
+            DocumentType.FACTURE, DocumentType.TICKET, DocumentType.SIMPLIFIEE,
+            DocumentType.EXPORT ->
+                "ARRÊTÉE LA PRÉSENTE FACTURE À LA SOMME DE :"
+        }
+        return "$opening ${amount(amount)}."
+    }
+
+    private fun numberToWords(n: Int): String {
+        if (n == 0) return ""
+        if (n < 10) return units[n]
+        if (n < 20) return teens[n - 10]
+        if (n < 70) {
+            val ten = n / 10
+            val unit = n % 10
+            val t = tens[ten]
+            return if (unit == 1 && ten == 8) {
+                // 71 is "soixante et onze"
+                t.replace("SOIXANTE", "SOIXANTE ET ONZE")
+            } else if (unit == 1) {
+                "$t ET UN"
+            } else if (unit == 0) {
+                t
+            } else {
+                "$t-${units[unit]}"
+            }
+        }
+        if (n < 80) {
+            // 60-79: soixante-dix, soixante et onze, etc.
+            val base = 60
+            val remainder = n - 60
+            return if (remainder == 10) {
+                "SOIXANTE-DIX"
+            } else if (remainder == 11) {
+                "SOIXANTE ET ONZE"
+            } else if (remainder < 20) {
+                "SOIXANTE-${teens[remainder - 10]}"
+            } else {
+                "SOIXANTE-${tens[remainder / 10]}${if (remainder % 10 == 0) "" else "-${units[remainder % 10]}"}"
+            }
+        }
+        if (n < 100) {
+            // 80-99: quatre-vingts, quatre-vingt-un, etc.
+            val base = 80
+            val remainder = n - 80
+            return if (remainder == 0) {
+                "QUATRE-VINGTS"
+            } else if (remainder == 1) {
+                "QUATRE-VINGT-UN"
+            } else if (remainder < 10) {
+                // 82-89 read "quatre-vingt-deux"…"quatre-vingt-neuf". This
+                // branch used to index `teens` with a negative number, which
+                // threw and left the whole PDF unwritten for any invoice whose
+                // total ended in 82 to 89.
+                "QUATRE-VINGT-${units[remainder]}"
+            } else {
+                "QUATRE-VINGT-${teens[remainder - 10]}"
+            }
+        }
+        if (n < 1000) {
+            val hundred = n / 100
+            val remainder = n % 100
+            val h = if (hundred == 1) "CENT" else "${units[hundred]} CENT"
+            return if (remainder == 0) {
+                // "cent" takes an s only when it ends the number: deux cents,
+                // but deux cent un. A stray space before that s turns the word
+                // into three ("cent s trente"), which is what this used to do.
+                if (hundred > 1) h + "S" else h
+            } else {
+                "$h ${numberToWords(remainder)}"
+            }
+        }
+        if (n < 1_000_000) {
+            val thousand = n / 1000
+            val remainder = n % 1000
+            // "mille" is invariable and always follows the multiplier:
+            // 52 152 reads "cinquante-deux mille cent cinquante-deux". The
+            // multiplier used to be returned on its own, so every amount from
+            // 2 000 up lost the "mille" and read as a smaller number.
+            //
+            // "cent" and "vingt" take their s only when they end the number
+            // *and* no numeral adjective follows. "mille" is one, so 200 000
+            // is "deux cent mille" and 80 000 is "quatre-vingt mille" — the
+            // same rule that makes 200 "deux cents".
+            val multiplier = if (thousand == 1) "" else numberToWords(thousand)
+                .replace(Regex("CENTS$"), "CENT")
+                .replace(Regex("VINGTS$"), "VINGT")
+            val t = if (thousand == 1) "MILLE" else "$multiplier MILLE"
+            return if (remainder == 0) {
+                t
+            } else {
+                "$t ${numberToWords(remainder)}"
+            }
+        }
+        return numberToWords(n / 1_000_000) + " MILLION" + (if (n / 1_000_000 > 1) "S" else "") +
+            (if (n % 1_000_000 == 0) "" else " ${numberToWords(n % 1_000_000)}")
+    }
+
+    private fun trim(s: String): String = s.trim().replace("\\s+".toRegex(), " ")
+}

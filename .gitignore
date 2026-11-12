@@ -1,0 +1,33 @@
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.tar.bz2
+*.rar
+
+# Gradle wrapper JAR is checked in so ./gradlew works out of the box.
+!gradle/wrapper/gradle-wrapper.jar
+
+# Gradle
+.gradle/
+build/
+out/
+*.iml
+.gradletasknamecache
+
+# IDE
+.idea/
+*.iws
+*.ipr
+*.iws
+.vscode/
+*.sublime*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kotlin
+.kotlin/
